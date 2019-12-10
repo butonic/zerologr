@@ -25,6 +25,9 @@ import (
 	"github.com/rs/zerolog"
 )
 
+const debugVerbosity = 2
+const traceVerbosity = 8
+
 // New returns a logr.Logger which is implemented by zerolog.
 func New() logr.Logger {
 	return NewWithOptions(Options{})
@@ -37,10 +40,10 @@ func NewWithOptions(opts Options) logr.Logger {
 		opts.Logger = &l
 	}
 	return logger{
-		l:      opts.Logger,
-		level:  0,
-		prefix: opts.Name,
-		values: nil,
+		l:         opts.Logger,
+		verbosity: 0,
+		prefix:    opts.Name,
+		values:    nil,
 	}
 }
 
@@ -54,10 +57,10 @@ type Options struct {
 
 // logger is a logr.Logger that uses zerolog to log.
 type logger struct {
-	l      *zerolog.Logger
-	level  int
-	prefix string
-	values []interface{}
+	l         *zerolog.Logger
+	verbosity int
+	prefix    string
+	values    []interface{}
 }
 
 func (l logger) clone() logger {
@@ -72,13 +75,10 @@ func copySlice(in []interface{}) []interface{} {
 	return out
 }
 
-// handleEvent converts a bunch of arbitrary key-value pairs into Zap fields.  It takes
-// additional pre-converted Zap fields, for use with automatically attached fields, like
-// `error`.
+// add converts a bunch of arbitrary key-value pairs into zerolog fields.
 func add(e *zerolog.Event, keysAndVals []interface{}) {
-	// a slightly modified version of zap.SugaredLogger.sweetenFields
 
-	// make sure this isn't a mismatched key
+	// make sure we got an even number of arguments
 	if len(keysAndVals)%2 != 0 {
 		e.Interface("args", keysAndVals).
 			AnErr("zerologr-err", errors.New("odd number of arguments passed as key-value pairs for logging")).
@@ -106,7 +106,15 @@ func add(e *zerolog.Event, keysAndVals []interface{}) {
 
 func (l logger) Info(msg string, keysAndVals ...interface{}) {
 	if l.Enabled() {
-		e := l.l.Info().Int("level", l.level)
+		var e *zerolog.Event
+		if l.verbosity < debugVerbosity {
+			e = l.l.Info()
+		} else if l.verbosity < traceVerbosity {
+			e = l.l.Debug()
+		} else {
+			e = l.l.Trace()
+		}
+		e.Int("verbosity", l.verbosity)
 		if l.prefix != "" {
 			e.Str("name", l.prefix)
 		}
@@ -118,9 +126,9 @@ func (l logger) Info(msg string, keysAndVals ...interface{}) {
 
 func (l logger) Enabled() bool {
 	var lvl zerolog.Level
-	if l.level < 2 {
+	if l.verbosity < debugVerbosity {
 		lvl = zerolog.InfoLevel
-	} else if l.level < 7 {
+	} else if l.verbosity < traceVerbosity {
 		lvl = zerolog.DebugLevel
 	} else {
 		lvl = zerolog.TraceLevel
@@ -141,9 +149,9 @@ func (l logger) Error(err error, msg string, keysAndVals ...interface{}) {
 	e.Msg(msg)
 }
 
-func (l logger) V(level int) logr.InfoLogger {
+func (l logger) V(verbosity int) logr.InfoLogger {
 	new := l.clone()
-	new.level = level
+	new.verbosity = verbosity
 	return new
 }
 
